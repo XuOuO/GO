@@ -28,7 +28,7 @@ const SERVER_URL_PARAM = new URLSearchParams(window.location.search).get(
   "server"
 );
 const SERVER_URL =
-  SERVER_URL_PARAM || "wss://YOUR-RENDER-SERVICE.onrender.com";
+  SERVER_URL_PARAM || "wss://go-kcmw.onrender.com";
 
 const STONE = {
   BLACK: 1,
