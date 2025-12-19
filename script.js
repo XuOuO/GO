@@ -5,6 +5,11 @@ const newGameButton = document.getElementById("newGame");
 const undoButton = document.getElementById("undoMove");
 const passButton = document.getElementById("passTurn");
 const clearBoardButton = document.getElementById("clearBoard");
+const createRoomButton = document.getElementById("createRoom");
+const joinRoomButton = document.getElementById("joinRoom");
+const roomCodeInput = document.getElementById("roomCodeInput");
+const roomStatusEl = document.getElementById("roomStatus");
+const roomCodeEl = document.getElementById("roomCode");
 const turnText = document.getElementById("turnText");
 const turnDot = document.getElementById("turnDot");
 const statusHint = document.getElementById("statusHint");
@@ -16,6 +21,14 @@ const coinEl = document.getElementById("coin");
 const coinResultEl = document.getElementById("coinResult");
 const player1ColorEl = document.getElementById("player1Color");
 const player2ColorEl = document.getElementById("player2Color");
+const player1NameInput = document.getElementById("player1Name");
+const player2NameInput = document.getElementById("player2Name");
+
+const SERVER_URL_PARAM = new URLSearchParams(window.location.search).get(
+  "server"
+);
+const SERVER_URL =
+  SERVER_URL_PARAM || "wss://YOUR-RENDER-SERVICE.onrender.com";
 
 const STONE = {
   BLACK: 1,
@@ -37,7 +50,19 @@ const state = {
   hintTimer: null,
   gameStarted: false,
   coinFlipping: false,
-  playerColors: { player1: "TBD", player2: "TBD" },
+  playerAssignments: { blackPlayer: null, whitePlayer: null },
+  playerNames: { 1: "", 2: "" },
+  lastActionBy: null,
+  nameUpdateTimer: null,
+  mode: "local",
+  online: {
+    connected: false,
+    roomCode: null,
+    playerNumber: null,
+    host: null,
+    players: 0,
+    socket: null,
+  },
 };
 
 const metrics = {
@@ -46,7 +71,7 @@ const metrics = {
   cell: 0,
 };
 
-function resetBoard(size, started) {
+function resetGame(size, started) {
   state.size = size;
   state.board = Array.from({ length: size }, () => Array(size).fill(0));
   state.current = STONE.BLACK;
@@ -56,6 +81,7 @@ function resetBoard(size, started) {
   state.passes = 0;
   state.gameOver = false;
   state.history = [];
+  state.lastActionBy = null;
   state.gameStarted = started;
 
   clearHintTimer();
@@ -94,10 +120,12 @@ function updateStatus() {
   }
 
   if (state.current === STONE.BLACK) {
-    turnText.textContent = "Black to play";
+    const name = getNameForColor(STONE.BLACK);
+    turnText.textContent = name ? `Black to play (${name})` : "Black to play";
     turnDot.style.background = "#1f1c18";
   } else {
-    turnText.textContent = "White to play";
+    const name = getNameForColor(STONE.WHITE);
+    turnText.textContent = name ? `White to play (${name})` : "White to play";
     turnDot.style.background = "#f5f1ea";
   }
 
@@ -113,6 +141,15 @@ function defaultHint() {
     return "Game over. Press New game to play again.";
   }
   if (!state.gameStarted) {
+    if (isOnline()) {
+      if (state.online.players < 2) {
+        return "Waiting for another player to join.";
+      }
+      if (isHost()) {
+        return "Opponent joined. Press New game to start.";
+      }
+      return "Waiting for host to start.";
+    }
     return "Press New game to flip and start.";
   }
   return "Click an intersection to place a stone. Two passes end the game.";
@@ -126,7 +163,7 @@ function setStatusHint(message, temporary = false) {
   state.hintTimer = window.setTimeout(() => {
     statusHint.textContent = defaultHint();
     state.hintTimer = null;
-  }, 1200);
+  }, 1400);
 }
 
 function clearHintTimer() {
@@ -141,19 +178,175 @@ function updateCaptures() {
   whiteCapturesEl.textContent = String(state.captures.white);
 }
 
+function getPlayerDisplayName(playerNumber) {
+  const raw = state.playerNames[playerNumber];
+  if (raw && raw.trim().length > 0) {
+    return raw.trim();
+  }
+  return `Player ${playerNumber}`;
+}
+
+function getNameForColor(color) {
+  if (!state.playerAssignments.blackPlayer) return null;
+  const playerNumber =
+    color === STONE.BLACK
+      ? state.playerAssignments.blackPlayer
+      : state.playerAssignments.whitePlayer;
+  return getPlayerDisplayName(playerNumber);
+}
+
+function syncNameInputs() {
+  if (document.activeElement !== player1NameInput) {
+    player1NameInput.value = state.playerNames[1] || "";
+  }
+  if (document.activeElement !== player2NameInput) {
+    player2NameInput.value = state.playerNames[2] || "";
+  }
+}
+
+function setRoomCode(code) {
+  roomCodeEl.textContent = code ? `Room code: ${code}` : "Room code: —";
+}
+
+function updateRoomStatus() {
+  if (!state.online.connected) {
+    roomStatusEl.textContent = "Offline";
+    setRoomCode(null);
+    return;
+  }
+
+  if (state.online.players < 2) {
+    roomStatusEl.textContent = "Waiting for opponent...";
+    return;
+  }
+
+  if (!state.gameStarted) {
+    roomStatusEl.textContent = isHost()
+      ? "Opponent joined. Press New game to start."
+      : "Opponent joined. Waiting for host.";
+    return;
+  }
+
+  roomStatusEl.textContent = "Online match in progress.";
+}
+
 function updatePlayerLabels() {
-  player1ColorEl.textContent = state.playerColors.player1;
-  player2ColorEl.textContent = state.playerColors.player2;
+  if (!state.playerAssignments.blackPlayer) {
+    player1ColorEl.textContent = "TBD";
+    player2ColorEl.textContent = "TBD";
+    syncNameInputs();
+    return;
+  }
+
+  const player1Black = state.playerAssignments.blackPlayer === 1;
+  player1ColorEl.textContent = player1Black ? "Black" : "White";
+  player2ColorEl.textContent = player1Black ? "White" : "Black";
+  syncNameInputs();
+}
+
+function applyNamesFromServer(names) {
+  if (!names) return;
+  state.playerNames[1] = names[1] || "";
+  state.playerNames[2] = names[2] || "";
+  syncNameInputs();
+  updateStatus();
+}
+
+function handleNameInput(playerNumber, value) {
+  const trimmed = value.trim();
+  state.playerNames[playerNumber] = trimmed;
+  updateStatus();
+  updatePlayerLabels();
+  queueNameUpdate(playerNumber);
+}
+
+function queueNameUpdate(playerNumber) {
+  if (!isOnline()) return;
+  if (state.online.playerNumber !== playerNumber) return;
+
+  if (state.nameUpdateTimer) {
+    window.clearTimeout(state.nameUpdateTimer);
+  }
+
+  state.nameUpdateTimer = window.setTimeout(() => {
+    sendMessage({ type: "set_name", name: state.playerNames[playerNumber] });
+    state.nameUpdateTimer = null;
+  }, 400);
+}
+
+function resetCoinDisplay() {
+  coinEl.classList.remove("heads", "tails", "flipping");
+  coinResultEl.textContent = "Press New game to flip.";
 }
 
 function updateControlStates() {
+  const online = isOnline();
   const canPlay =
     state.gameStarted && !state.gameOver && !state.coinFlipping;
-  passButton.disabled = !canPlay;
-  undoButton.disabled = state.history.length === 0 || state.coinFlipping;
-  newGameButton.disabled = state.coinFlipping;
-  clearBoardButton.disabled = state.coinFlipping;
-  boardSizeSelect.disabled = state.coinFlipping;
+  const yourTurn = online ? isYourTurn() : canPlay;
+
+  passButton.disabled = !canPlay || (online && !yourTurn);
+  if (online) {
+    const canUndoOnline =
+      state.gameStarted &&
+      !state.gameOver &&
+      state.lastActionBy === state.online.playerNumber;
+    undoButton.disabled = !canUndoOnline || state.coinFlipping;
+  } else {
+    undoButton.disabled = state.history.length === 0 || state.coinFlipping;
+  }
+  clearBoardButton.disabled = state.coinFlipping || online;
+
+  if (online) {
+    newGameButton.disabled =
+      !isHost() || state.online.players < 2 || state.coinFlipping;
+  } else {
+    newGameButton.disabled = state.coinFlipping;
+  }
+
+  createRoomButton.disabled = state.coinFlipping || online;
+  joinRoomButton.disabled = state.coinFlipping || online;
+  roomCodeInput.disabled = state.coinFlipping || online;
+
+  if (online) {
+    boardSizeSelect.disabled =
+      !isHost() || state.gameStarted || state.coinFlipping;
+  } else {
+    boardSizeSelect.disabled = state.coinFlipping;
+  }
+
+  if (online) {
+    player1NameInput.disabled =
+      state.coinFlipping || state.online.playerNumber !== 1;
+    player2NameInput.disabled =
+      state.coinFlipping || state.online.playerNumber !== 2;
+  } else {
+    player1NameInput.disabled = state.coinFlipping;
+    player2NameInput.disabled = state.coinFlipping;
+  }
+}
+
+function isOnline() {
+  return state.mode === "online" && state.online.connected;
+}
+
+function isHost() {
+  return isOnline() && state.online.host === state.online.playerNumber;
+}
+
+function isYourTurn() {
+  if (!isOnline() || !state.gameStarted) return false;
+  const playerColor = getOnlinePlayerColor();
+  return playerColor === state.current;
+}
+
+function getOnlinePlayerColor() {
+  if (!state.playerAssignments.blackPlayer || !state.online.playerNumber) {
+    return null;
+  }
+  return state.playerAssignments.blackPlayer === state.online.playerNumber
+    ? STONE.BLACK
+    : STONE.WHITE;
 }
 
 function snapshotState() {
@@ -166,6 +359,7 @@ function snapshotState() {
     passes: state.passes,
     gameOver: state.gameOver,
     gameStarted: state.gameStarted,
+    lastActionBy: state.lastActionBy,
   };
 }
 
@@ -178,6 +372,7 @@ function restoreState(snapshot) {
   state.passes = snapshot.passes;
   state.gameOver = snapshot.gameOver;
   state.gameStarted = snapshot.gameStarted;
+  state.lastActionBy = snapshot.lastActionBy || null;
 
   updateCaptures();
 
@@ -476,13 +671,8 @@ function applyMove(row, col, player) {
   return { legal: true, board: boardCopy, captured, koPoint };
 }
 
-function placeStone(row, col) {
-  if (state.coinFlipping) return;
-  if (!state.gameStarted) {
-    setStatusHint("Press New game to start.", true);
-    return;
-  }
-  if (state.gameOver) return;
+function placeStoneLocal(row, col) {
+  if (state.gameOver || state.coinFlipping) return;
 
   const result = applyMove(row, col, state.current);
   if (!result.legal) {
@@ -495,6 +685,7 @@ function placeStone(row, col) {
   state.koPoint = result.koPoint;
   state.lastMove = { row, col };
   state.passes = 0;
+  state.lastActionBy = state.current;
 
   if (result.captured.length > 0) {
     if (state.current === STONE.BLACK) {
@@ -510,13 +701,13 @@ function placeStone(row, col) {
   draw();
 }
 
-function passTurn() {
-  if (state.coinFlipping) return;
-  if (!state.gameStarted || state.gameOver) return;
+function passTurnLocal() {
+  if (state.gameOver || state.coinFlipping) return;
 
   pushHistory();
   state.passes += 1;
   state.koPoint = null;
+  state.lastActionBy = state.current;
 
   if (state.passes >= 2) {
     endGame();
@@ -610,15 +801,8 @@ function undoMove() {
   setStatusHint("Move undone.", true);
 }
 
-function setPlayerAssignments(blackPlayer, whitePlayer) {
-  state.playerColors.player1 = blackPlayer === "Player 1" ? "Black" : "White";
-  state.playerColors.player2 = whitePlayer === "Player 2" ? "White" : "Black";
-  updatePlayerLabels();
-}
-
-function startNewGame() {
+function runCoinFlip(result, assignments, onComplete) {
   if (state.coinFlipping) return;
-
   state.coinFlipping = true;
   updateStatus();
 
@@ -626,50 +810,343 @@ function startNewGame() {
   coinEl.classList.add("flipping");
   coinResultEl.textContent = "Flipping...";
 
-  const result = Math.random() < 0.5 ? "heads" : "tails";
-  const blackPlayer = result === "heads" ? "Player 1" : "Player 2";
-  const whitePlayer = result === "heads" ? "Player 2" : "Player 1";
-
   window.setTimeout(() => {
     state.coinFlipping = false;
     coinEl.classList.remove("flipping");
     coinEl.classList.add(result);
-    setPlayerAssignments(blackPlayer, whitePlayer);
+    state.playerAssignments = assignments;
+    updatePlayerLabels();
+    const blackName = getPlayerDisplayName(assignments.blackPlayer);
     coinResultEl.textContent =
       result === "heads"
-        ? "Heads: Player 1 is Black."
-        : "Tails: Player 2 is Black.";
-    resetBoard(state.size, true);
-    setStatusHint("Game start. Black plays first.", true);
+        ? `Heads: ${blackName} is Black.`
+        : `Tails: ${blackName} is Black.`;
+    onComplete();
   }, 1100);
 }
 
-canvas.addEventListener("click", (event) => {
+function startLocalGame() {
+  const result = Math.random() < 0.5 ? "heads" : "tails";
+  const assignments =
+    result === "heads"
+      ? { blackPlayer: 1, whitePlayer: 2 }
+      : { blackPlayer: 2, whitePlayer: 1 };
+
+  runCoinFlip(result, assignments, () => {
+    resetGame(state.size, true);
+    setStatusHint("Game start. Black plays first.", true);
+  });
+}
+
+function handleNewGame() {
+  if (state.coinFlipping) return;
+
+  if (isOnline()) {
+    if (!isHost()) {
+      setStatusHint("Waiting for host to start.", true);
+      return;
+    }
+    if (state.online.players < 2) {
+      setStatusHint("Waiting for opponent to join.", true);
+      return;
+    }
+    sendMessage({ type: "start_game", size: state.size });
+    return;
+  }
+
+  startLocalGame();
+}
+
+function clearLocalBoard() {
+  if (isOnline()) {
+    setStatusHint("Clear board is disabled in online play.", true);
+    return;
+  }
+  resetGame(state.size, state.gameStarted);
+}
+
+function handleBoardClick(event) {
   const hit = getIntersection(event);
   if (!hit) return;
-  placeStone(hit.row, hit.col);
+
+  if (state.coinFlipping) return;
+
+  if (!state.gameStarted) {
+    setStatusHint("Press New game to start.", true);
+    return;
+  }
+
+  if (isOnline()) {
+    if (!isYourTurn()) {
+      setStatusHint("Wait for your turn.", true);
+      return;
+    }
+    sendMessage({ type: "move", row: hit.row, col: hit.col });
+    return;
+  }
+
+  placeStoneLocal(hit.row, hit.col);
+}
+
+function handlePass() {
+  if (state.coinFlipping) return;
+  if (!state.gameStarted || state.gameOver) return;
+
+  if (isOnline()) {
+    if (!isYourTurn()) {
+      setStatusHint("Wait for your turn.", true);
+      return;
+    }
+    sendMessage({ type: "pass" });
+    return;
+  }
+
+  passTurnLocal();
+}
+
+function handleUndo() {
+  if (state.coinFlipping) return;
+  if (isOnline()) {
+    sendMessage({ type: "undo" });
+    return;
+  }
+  undoMove();
+}
+
+function handleBoardSizeChange(event) {
+  const size = Number(event.target.value);
+  resetGame(size, false);
+  resizeCanvas();
+}
+
+function sendMessage(payload) {
+  if (!state.online.socket || state.online.socket.readyState !== WebSocket.OPEN) {
+    setStatusHint("Not connected to server.", true);
+    return;
+  }
+  state.online.socket.send(JSON.stringify(payload));
+}
+
+function connectToServer(action) {
+  if (state.online.socket && state.online.socket.readyState === WebSocket.OPEN) {
+    sendMessage(action);
+    return;
+  }
+
+  const socket = new WebSocket(SERVER_URL);
+  state.online.socket = socket;
+
+  socket.addEventListener("open", () => {
+    state.mode = "online";
+    state.online.connected = true;
+    sendMessage(action);
+    updateRoomStatus();
+    updateControlStates();
+  });
+
+  socket.addEventListener("message", (event) => {
+    handleServerMessage(event.data);
+  });
+
+  socket.addEventListener("close", () => {
+    resetOnlineState();
+  });
+
+  socket.addEventListener("error", () => {
+    setStatusHint("Server connection error.", true);
+  });
+}
+
+function resetOnlineState() {
+  if (state.nameUpdateTimer) {
+    window.clearTimeout(state.nameUpdateTimer);
+    state.nameUpdateTimer = null;
+  }
+  state.online = {
+    connected: false,
+    roomCode: null,
+    playerNumber: null,
+    host: null,
+    players: 0,
+    socket: null,
+  };
+  state.mode = "local";
+  resetCoinDisplay();
+  state.playerAssignments = { blackPlayer: null, whitePlayer: null };
+  updatePlayerLabels();
+  resetGame(state.size, false);
+  updateRoomStatus();
+  updateControlStates();
+  setStatusHint("Disconnected. Playing locally.", true);
+}
+
+function handleServerMessage(raw) {
+  let message;
+  try {
+    message = JSON.parse(raw);
+  } catch (error) {
+    return;
+  }
+
+  switch (message.type) {
+    case "room_created":
+    case "room_joined": {
+      state.mode = "online";
+      state.online.connected = true;
+      state.online.roomCode = message.code;
+      state.online.playerNumber = message.playerNumber;
+      state.online.host = message.host;
+      state.online.players = message.players;
+      setRoomCode(message.code);
+      updateRoomStatus();
+      resetGame(state.size, false);
+      resetCoinDisplay();
+      state.playerAssignments = { blackPlayer: null, whitePlayer: null };
+      applyNamesFromServer(message.names);
+      updatePlayerLabels();
+      updateControlStates();
+      queueNameUpdate(state.online.playerNumber);
+      break;
+    }
+    case "room_update": {
+      state.online.players = message.players;
+      state.online.host = message.host;
+      applyNamesFromServer(message.names);
+      updateRoomStatus();
+      updateControlStates();
+      if (message.note) {
+        setStatusHint(message.note, true);
+      }
+      break;
+    }
+    case "host_changed": {
+      state.online.host = message.host;
+      updateRoomStatus();
+      updateControlStates();
+      setStatusHint("Host changed.", true);
+      break;
+    }
+    case "game_started": {
+      const assignments = message.assignments;
+      const result = assignments.blackPlayer === 1 ? "heads" : "tails";
+      applyNamesFromServer(message.names);
+      runCoinFlip(result, assignments, () => {
+        applyRemoteState(message.state);
+        setStatusHint("Game start. Black plays first.", true);
+      });
+      break;
+    }
+    case "state_update": {
+      if (message.assignments) {
+        state.playerAssignments = message.assignments;
+        updatePlayerLabels();
+      }
+      if (message.names) {
+        applyNamesFromServer(message.names);
+      }
+      applyRemoteState(message.state, message.score);
+      if (message.note) {
+        setStatusHint(message.note, true);
+      }
+      break;
+    }
+    case "game_reset": {
+      resetGame(state.size, false);
+      resetCoinDisplay();
+      state.playerAssignments = { blackPlayer: null, whitePlayer: null };
+      updatePlayerLabels();
+      updateRoomStatus();
+      break;
+    }
+    case "error": {
+      setStatusHint(message.message || "Server error.", true);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function applyRemoteState(remoteState, score) {
+  state.size = remoteState.size;
+  state.board = remoteState.board;
+  state.current = remoteState.current;
+  state.lastMove = remoteState.lastMove;
+  state.koPoint = remoteState.koPoint;
+  state.captures = remoteState.captures;
+  state.passes = remoteState.passes;
+  state.gameOver = remoteState.gameOver;
+  state.gameStarted = remoteState.gameStarted;
+  state.lastActionBy = remoteState.lastActionBy || null;
+  state.history = [];
+
+  boardSizeSelect.value = String(remoteState.size);
+  updateCaptures();
+
+  if (state.gameOver) {
+    showGameOver(score || buildScoreResult());
+  } else {
+    hideGameOver();
+  }
+
+  updateStatus();
+  updateRoomStatus();
+  updateControlStates();
+  resizeCanvas();
+}
+
+function handleCreateRoom() {
+  connectToServer({ type: "create_room" });
+}
+
+function handleJoinRoom() {
+  const code = roomCodeInput.value.trim().toUpperCase();
+  if (!code) {
+    setStatusHint("Enter a room code to join.", true);
+    return;
+  }
+  connectToServer({ type: "join_room", code });
+  roomCodeInput.value = "";
+}
+
+canvas.addEventListener("click", (event) => {
+  handleBoardClick(event);
 });
 
 newGameButton.addEventListener("click", () => {
-  startNewGame();
+  handleNewGame();
 });
 
 undoButton.addEventListener("click", () => {
-  undoMove();
+  handleUndo();
 });
 
 passButton.addEventListener("click", () => {
-  passTurn();
+  handlePass();
 });
 
 clearBoardButton.addEventListener("click", () => {
-  resetBoard(state.size, state.gameStarted);
+  clearLocalBoard();
+});
+
+createRoomButton.addEventListener("click", () => {
+  handleCreateRoom();
+});
+
+joinRoomButton.addEventListener("click", () => {
+  handleJoinRoom();
+});
+
+player1NameInput.addEventListener("input", () => {
+  handleNameInput(1, player1NameInput.value);
+});
+
+player2NameInput.addEventListener("input", () => {
+  handleNameInput(2, player2NameInput.value);
 });
 
 boardSizeSelect.addEventListener("change", (event) => {
-  const size = Number(event.target.value);
-  resetBoard(size, false);
-  resizeCanvas();
+  handleBoardSizeChange(event);
 });
 
 window.addEventListener("resize", () => {
@@ -677,5 +1154,7 @@ window.addEventListener("resize", () => {
 });
 
 updatePlayerLabels();
-resetBoard(state.size, false);
+updateRoomStatus();
+resetCoinDisplay();
+resetGame(state.size, false);
 resizeCanvas();

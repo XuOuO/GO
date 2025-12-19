@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Go Board - Local Two Player</title>
+    <title>Go Board - Local & Online</title>
     <link rel="stylesheet" href="style.css" />
     <link
       rel="stylesheet"
@@ -14,11 +14,11 @@
     <div class="page">
       <header class="hero">
         <div>
-          <p class="eyebrow">Local Two Player</p>
+          <p class="eyebrow">Local & Online</p>
           <h1>Go, With Just The Essentials</h1>
           <p class="subtitle">
-            Choose a board size, take turns placing stones, and play on the same
-            screen.
+            Choose a board size, take turns placing stones, or create a private
+            room to play online.
           </p>
         </div>
       </header>
@@ -34,6 +34,7 @@
             </select>
           </div>
           <div class="status-card embedded">
+            <div class="room-code" id="roomCode">Room code: —</div>
             <div class="status-label">Current turn</div>
             <div class="status-row">
               <span class="turn-dot" id="turnDot"></span>
@@ -58,14 +59,42 @@
             </div>
           </div>
           <div class="control-group">
+            <label>Online room</label>
+            <div class="room-actions">
+              <button id="createRoom" class="ghost">Create room</button>
+              <div class="join-row">
+                <input
+                  id="roomCodeInput"
+                  type="text"
+                  placeholder="Enter code"
+                  maxlength="6"
+                />
+                <button id="joinRoom" class="ghost">Join room</button>
+              </div>
+            </div>
+            <div class="room-status" id="roomStatus">Offline</div>
+          </div>
+          <div class="control-group">
             <label>Player colors</label>
             <div class="player-assignments">
               <div class="player-row">
-                <span>Player 1</span>
+                <label class="player-label" for="player1Name">Player 1</label>
+                <input
+                  id="player1Name"
+                  type="text"
+                  placeholder="Player 1"
+                  maxlength="16"
+                />
                 <span id="player1Color" class="player-color">TBD</span>
               </div>
               <div class="player-row">
-                <span>Player 2</span>
+                <label class="player-label" for="player2Name">Player 2</label>
+                <input
+                  id="player2Name"
+                  type="text"
+                  placeholder="Player 2"
+                  maxlength="16"
+                />
                 <span id="player2Color" class="player-color">TBD</span>
               </div>
             </div>

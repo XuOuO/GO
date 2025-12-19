@@ -81,6 +81,14 @@ h1 {
   min-width: 240px;
 }
 
+.room-code {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
 .status-card.embedded {
   min-width: 0;
   width: 100%;
@@ -124,15 +132,50 @@ h1 {
 }
 
 .player-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   font-size: 0.95rem;
   color: var(--ink);
 }
 
+.player-label {
+  color: var(--muted);
+}
+
 .player-color {
   font-weight: 500;
+  color: var(--muted);
+}
+
+.room-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.join-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(90, 82, 72, 0.2);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.room-status {
+  margin-top: 8px;
+  font-size: 0.85rem;
   color: var(--muted);
 }
 
