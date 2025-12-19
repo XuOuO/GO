@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Go Board - Local Two Player</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Space+Grotesk:wght@400;500&display=swap"
+    />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Local Two Player</p>
+          <h1>Go, With Just The Essentials</h1>
+          <p class="subtitle">
+            Choose a board size, take turns placing stones, and play on the same
+            screen.
+          </p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="controls">
+          <div class="control-group">
+            <label for="boardSize">Board size</label>
+            <select id="boardSize">
+              <option value="9">9 x 9</option>
+              <option value="13">13 x 13</option>
+              <option value="19" selected>19 x 19</option>
+            </select>
+          </div>
+          <div class="status-card embedded">
+            <div class="status-label">Current turn</div>
+            <div class="status-row">
+              <span class="turn-dot" id="turnDot"></span>
+              <span id="turnText">Black to play</span>
+            </div>
+            <div class="status-hint" id="statusHint">
+              Click an intersection to place a stone. Two passes end the game.
+            </div>
+            <div class="scoreboard">
+              <div class="score-row">
+                <span class="score-chip black"></span>
+                Captures: <span id="blackCaptures">0</span>
+              </div>
+              <div class="score-row">
+                <span class="score-chip white"></span>
+                Captures: <span id="whiteCaptures">0</span>
+              </div>
+            </div>
+            <div id="gameOverPanel" class="game-over hidden">
+              <div class="game-over-title">Game over</div>
+              <div id="scoreSummary"></div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Player colors</label>
+            <div class="player-assignments">
+              <div class="player-row">
+                <span>Player 1</span>
+                <span id="player1Color" class="player-color">TBD</span>
+              </div>
+              <div class="player-row">
+                <span>Player 2</span>
+                <span id="player2Color" class="player-color">TBD</span>
+              </div>
+            </div>
+            <div class="coin-wrap">
+              <div class="coin" id="coin" aria-label="Coin flip">
+                <div class="coin-face heads">H</div>
+                <div class="coin-face tails">T</div>
+              </div>
+              <div class="coin-text" id="coinResult">
+                Press New game to flip.
+              </div>
+            </div>
+          </div>
+          <button id="newGame" class="primary">New game</button>
+          <button id="undoMove" class="ghost">Undo</button>
+          <button id="passTurn" class="ghost">Pass</button>
+          <button id="clearBoard" class="ghost">Clear board</button>
+        </section>
+
+        <section class="board-wrap">
+          <div class="board-frame">
+            <canvas id="board" aria-label="Go board" role="img"></canvas>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
